@@ -44,144 +44,80 @@ func Generate(inv model.Invoice, global model.GlobalConfig, client model.ClientC
 	archivePath := filepath.Join(archiveDir, filename)
 
 	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.SetMargins(20, 20, 20)
+	pdf.SetMargins(18, 18, 18)
+	pdf.SetAutoPageBreak(true, 18)
 	pdf.AddPage()
 
-	// --- Header: Your info (left) + Invoice details (right) ---
-	pdf.SetFont("Helvetica", "B", 20)
-	pdf.Cell(100, 10, global.User.Name)
-
-	pdf.SetFont("Helvetica", "B", 10)
-	pdf.SetX(130)
-	pdf.Cell(60, 10, fmt.Sprintf("Invoice %s", inv.ID))
-	pdf.Ln(7)
-
-	pdf.SetFont("Helvetica", "", 9)
-	for _, line := range splitAddress(global.User.Address) {
-		pdf.Cell(100, 5, line)
-		pdf.Ln(5)
-	}
-
-	// Invoice meta (right side)
-	pdf.SetY(30)
-	pdf.SetFont("Helvetica", "", 9)
-	rightX := 130.0
-	pdf.SetX(rightX)
-	pdf.Cell(25, 5, "Date:")
-	pdf.Cell(40, 5, inv.Date)
-	pdf.Ln(5)
-	pdf.SetX(rightX)
-	pdf.Cell(25, 5, "Terms:")
-	pdf.Cell(40, 5, inv.PaymentTerms)
-	pdf.Ln(12)
-
-	// --- Bill To ---
-	y := pdf.GetY()
-	if y < 50 {
-		y = 50
-	}
-	pdf.SetY(y)
-	pdf.SetFont("Helvetica", "B", 9)
-	pdf.Cell(100, 5, "Bill To:")
-	pdf.Ln(6)
-	pdf.SetFont("Helvetica", "", 9)
-	pdf.Cell(100, 5, client.Name)
-	pdf.Ln(5)
-	for _, line := range splitAddress(client.Address) {
-		pdf.Cell(100, 5, line)
-		pdf.Ln(5)
-	}
-
-	pdf.Ln(10)
+	drawHeader(pdf, inv, global)
+	drawRecipient(pdf, client)
 
 	// --- Line items table ---
-	tableTop := pdf.GetY()
-	colWidths := []float64{85, 20, 30, 35}
+	tableTop := pdf.GetY() + 10
+	if tableTop < 102 {
+		tableTop = 102
+	}
+	pdf.SetY(tableTop)
+
+	colWidths := []float64{96, 18, 30, 30}
 	headers := []string{"Description", "Qty", "Rate", "Total"}
+	lineHeight := 6.0
+	textColor := rgb{40, 44, 52}
+	mutedText := rgb{107, 114, 128}
+	lineColor := rgb{226, 232, 240}
+	headerFill := rgb{241, 245, 249}
+	accent := rgb{37, 99, 235}
 
 	// Header row
-	pdf.SetFont("Helvetica", "B", 9)
-	pdf.SetFillColor(245, 245, 245)
+	pdf.SetFont("Helvetica", "B", 10)
+	setTextColor(pdf, textColor)
+	setFillColor(pdf, headerFill)
 	for i, h := range headers {
 		align := "L"
 		if i > 0 {
 			align = "R"
 		}
-		pdf.CellFormat(colWidths[i], 7, h, "", 0, align, true, 0, "")
+		pdf.CellFormat(colWidths[i], 8, h, "", 0, align, true, 0, "")
 	}
-	pdf.Ln(7)
+	pdf.Ln(8)
 
 	// Separator line
-	pdf.SetDrawColor(200, 200, 200)
-	pdf.Line(20, pdf.GetY(), 190, pdf.GetY())
-	pdf.Ln(2)
+	setDrawColor(pdf, lineColor)
+	pdf.SetLineWidth(0.3)
+	pdf.Line(18, pdf.GetY(), 192, pdf.GetY())
+	pdf.Ln(3)
 
 	// Data rows
-	pdf.SetFont("Helvetica", "", 9)
+	pdf.SetFont("Helvetica", "", 10)
 	for _, li := range inv.LineItems {
 		startY := pdf.GetY()
+		pdf.SetX(18)
 
 		// Description (may wrap)
-		pdf.MultiCell(colWidths[0], 5, li.Description, "", "L", false)
+		setTextColor(pdf, textColor)
+		pdf.MultiCell(colWidths[0], lineHeight, li.Description, "", "L", false)
 		descEndY := pdf.GetY()
+		rowHeight := descEndY - startY
+		if rowHeight < lineHeight {
+			rowHeight = lineHeight
+		}
 
 		// Qty, Rate, Total on same row
-		pdf.SetXY(20+colWidths[0], startY)
-		pdf.CellFormat(colWidths[1], 5, money.FormatQuantity(li.Quantity), "", 0, "R", false, 0, "")
-		pdf.CellFormat(colWidths[2], 5, money.FormatCents(li.Rate, cur), "", 0, "R", false, 0, "")
-		pdf.CellFormat(colWidths[3], 5, money.FormatCents(li.LineTotal(), cur), "", 0, "R", false, 0, "")
+		pdf.SetXY(18+colWidths[0], startY)
+		setTextColor(pdf, mutedText)
+		pdf.CellFormat(colWidths[1], rowHeight, money.FormatQuantity(li.Quantity), "", 0, "R", false, 0, "")
+		setTextColor(pdf, textColor)
+		pdf.CellFormat(colWidths[2], rowHeight, money.FormatCents(li.Rate, cur), "", 0, "R", false, 0, "")
+		pdf.CellFormat(colWidths[3], rowHeight, money.FormatCents(li.LineTotal(), cur), "", 0, "R", false, 0, "")
 
-		if descEndY > startY+5 {
-			pdf.SetY(descEndY)
-		} else {
-			pdf.Ln(6)
-		}
+		pdf.SetY(startY + rowHeight + 1.5)
+		setDrawColor(pdf, lineColor)
+		pdf.Line(18, pdf.GetY(), 192, pdf.GetY())
+		pdf.Ln(3.5)
 	}
-
-	// Separator
-	pdf.Ln(2)
-	pdf.Line(20, pdf.GetY(), 190, pdf.GetY())
-	pdf.Ln(5)
 
 	// --- Totals ---
 	subtotal := inv.Subtotal()
-	totalX := 135.0
-	valX := 170.0 - 35.0
-
-	if len(client.Tax) > 0 {
-		// Subtotal
-		pdf.SetFont("Helvetica", "", 9)
-		pdf.SetX(totalX)
-		pdf.CellFormat(30, 6, "Subtotal:", "", 0, "R", false, 0, "")
-		pdf.CellFormat(35, 6, money.FormatCents(subtotal, cur), "", 0, "R", false, 0, "")
-		pdf.Ln(6)
-
-		// Tax lines
-		for _, tax := range client.Tax {
-			taxAmt := model.TaxAmount(subtotal, tax.Rate)
-			label := fmt.Sprintf("%s (%.4g%%):", tax.Name, tax.Rate*100)
-			pdf.SetX(totalX)
-			pdf.CellFormat(30, 6, label, "", 0, "R", false, 0, "")
-			pdf.CellFormat(35, 6, money.FormatCents(taxAmt, cur), "", 0, "R", false, 0, "")
-			pdf.Ln(6)
-		}
-
-		// Separator before total
-		pdf.SetX(totalX)
-		pdf.Line(totalX, pdf.GetY(), 190, pdf.GetY())
-		pdf.Ln(3)
-	}
-
-	// Total
-	total := inv.Total(client.Tax)
-	pdf.SetFont("Helvetica", "B", 11)
-	pdf.SetX(totalX)
-	pdf.CellFormat(30, 8, "Total:", "", 0, "R", false, 0, "")
-	pdf.CellFormat(35, 8, money.FormatCents(total, cur), "", 0, "R", false, 0, "")
-
-	// Suppress unused variable
-	_ = tableTop
-	_ = valX
+	drawTotals(pdf, subtotal, client.Tax, inv.Total(client.Tax), cur, accent, textColor, mutedText, lineColor)
 
 	if err := pdf.OutputFileAndClose(exportPath); err != nil {
 		return "", "", fmt.Errorf("writing PDF: %w", err)
@@ -196,19 +132,188 @@ func Generate(inv model.Invoice, global model.GlobalConfig, client model.ClientC
 	return exportPath, archivePath, nil
 }
 
-func splitAddress(addr string) []string {
+type rgb struct {
+	r int
+	g int
+	b int
+}
+
+func drawHeader(pdf *fpdf.Fpdf, inv model.Invoice, global model.GlobalConfig) {
+	accent := rgb{37, 99, 235}
+	textColor := rgb{17, 24, 39}
+	mutedText := rgb{107, 114, 128}
+	panelFill := rgb{248, 250, 252}
+	lineColor := rgb{226, 232, 240}
+
+	setFillColor(pdf, accent)
+	pdf.Rect(18, 18, 34, 2.5, "F")
+
+	setTextColor(pdf, textColor)
+	pdf.SetFont("Helvetica", "B", 24)
+	pdf.SetXY(18, 24)
+	pdf.CellFormat(96, 9, global.User.Name, "", 0, "L", false, 0, "")
+
+	setTextColor(pdf, accent)
+	pdf.SetFont("Helvetica", "B", 9)
+	pdf.SetXY(130, 23)
+	pdf.CellFormat(62, 5, "INVOICE", "", 0, "R", false, 0, "")
+
+	setTextColor(pdf, textColor)
+	pdf.SetFont("Helvetica", "B", 18)
+	pdf.SetXY(130, 28)
+	pdf.CellFormat(62, 8, inv.ID, "", 0, "R", false, 0, "")
+
+	setTextColor(pdf, mutedText)
+	pdf.SetFont("Helvetica", "", 10)
+	pdf.SetXY(18, 36)
+	pdf.MultiCell(82, 5.2, formatAddress(global.User.Address), "", "L", false)
+
+	metaX := 122.0
+	metaY := 39.0
+	metaW := 70.0
+	metaH := 24.0
+	setFillColor(pdf, panelFill)
+	setDrawColor(pdf, lineColor)
+	pdf.Rect(metaX, metaY, metaW, metaH, "FD")
+
+	writeMetaRow(pdf, metaX+4, metaY+5, "Date", inv.Date, accent, textColor)
+	writeMetaRow(pdf, metaX+4, metaY+12, "Terms", inv.PaymentTerms, accent, textColor)
+
+	pdf.SetY(72)
+}
+
+func drawRecipient(pdf *fpdf.Fpdf, client model.ClientConfig) {
+	accent := rgb{37, 99, 235}
+	textColor := rgb{17, 24, 39}
+	mutedText := rgb{107, 114, 128}
+
+	setTextColor(pdf, accent)
+	pdf.SetFont("Helvetica", "B", 9)
+	pdf.CellFormat(80, 5, "BILL TO", "", 0, "L", false, 0, "")
+	pdf.Ln(7)
+
+	setTextColor(pdf, textColor)
+	pdf.SetFont("Helvetica", "B", 12)
+	pdf.CellFormat(100, 6, client.Name, "", 0, "L", false, 0, "")
+	pdf.Ln(7)
+
+	setTextColor(pdf, mutedText)
+	pdf.SetFont("Helvetica", "", 10)
+	pdf.MultiCell(88, 5.2, formatAddress(client.Address), "", "L", false)
+}
+
+func drawTotals(
+	pdf *fpdf.Fpdf,
+	subtotal int,
+	taxes []model.TaxEntry,
+	total int,
+	currency string,
+	accent rgb,
+	textColor rgb,
+	mutedText rgb,
+	lineColor rgb,
+) {
+	cardX := 126.0
+	cardW := 66.0
+	cardY := pdf.GetY() + 6
+	cardH := 16.0
+	if len(taxes) > 0 {
+		cardH += float64(len(taxes)+1) * 6.5
+	}
+
+	setFillColor(pdf, rgb{248, 250, 252})
+	setDrawColor(pdf, lineColor)
+	pdf.Rect(cardX, cardY, cardW, cardH, "FD")
+
+	setFillColor(pdf, accent)
+	pdf.Rect(cardX, cardY, cardW, 2, "F")
+
+	rowY := cardY + 7
+	if len(taxes) > 0 {
+		pdf.SetFont("Helvetica", "", 10)
+		setTextColor(pdf, mutedText)
+		writeMoneyRow(pdf, cardX+4, rowY, cardW-8, "Subtotal", money.FormatCents(subtotal, currency))
+		rowY += 6.5
+
+		for _, tax := range taxes {
+			writeMoneyRow(
+				pdf,
+				cardX+4,
+				rowY,
+				cardW-8,
+				fmt.Sprintf("%s (%.4g%%)", tax.Name, tax.Rate*100),
+				money.FormatCents(model.TaxAmount(subtotal, tax.Rate), currency),
+			)
+			rowY += 6.5
+		}
+
+		setDrawColor(pdf, lineColor)
+		pdf.Line(cardX+4, rowY, cardX+cardW-4, rowY)
+		rowY += 3
+	}
+
+	setTextColor(pdf, textColor)
+	pdf.SetFont("Helvetica", "B", 14)
+	pdf.SetXY(cardX+4, rowY)
+	pdf.CellFormat((cardW-8)/2, 8, "Total", "", 0, "L", false, 0, "")
+	pdf.CellFormat((cardW-8)/2, 8, money.FormatCents(total, currency), "", 0, "R", false, 0, "")
+}
+
+func writeMetaRow(pdf *fpdf.Fpdf, x, y float64, label, value string, labelColor, valueColor rgb) {
+	setTextColor(pdf, labelColor)
+	pdf.SetFont("Helvetica", "B", 8)
+	pdf.SetXY(x, y)
+	pdf.CellFormat(20, 4, strings.ToUpper(label), "", 0, "L", false, 0, "")
+
+	setTextColor(pdf, valueColor)
+	pdf.SetFont("Helvetica", "", 10)
+	pdf.CellFormat(42, 4, value, "", 0, "R", false, 0, "")
+}
+
+func writeMoneyRow(pdf *fpdf.Fpdf, x, y, width float64, label, value string) {
+	pdf.SetXY(x, y)
+	pdf.CellFormat(width*0.55, 4, label, "", 0, "L", false, 0, "")
+	pdf.CellFormat(width*0.45, 4, value, "", 0, "R", false, 0, "")
+}
+
+func formatAddress(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+
+	if strings.Contains(addr, "\n") {
+		lines := strings.Split(addr, "\n")
+		for i := range lines {
+			lines[i] = strings.TrimSpace(lines[i])
+		}
+		return strings.Join(lines, "\n")
+	}
+
 	parts := strings.Split(addr, ",")
-	var result []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
+	if len(parts) == 1 {
+		return addr
+	}
+
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+		if i < len(parts)-1 {
+			parts[i] += ","
 		}
 	}
-	if len(result) == 0 {
-		return []string{addr}
-	}
-	return result
+	return strings.Join(parts, "\n")
+}
+
+func setTextColor(pdf *fpdf.Fpdf, c rgb) {
+	pdf.SetTextColor(c.r, c.g, c.b)
+}
+
+func setFillColor(pdf *fpdf.Fpdf, c rgb) {
+	pdf.SetFillColor(c.r, c.g, c.b)
+}
+
+func setDrawColor(pdf *fpdf.Fpdf, c rgb) {
+	pdf.SetDrawColor(c.r, c.g, c.b)
 }
 
 func samePath(a, b string) bool {
