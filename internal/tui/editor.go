@@ -13,6 +13,7 @@ import (
 	"github.com/carter/inv/internal/model"
 	"github.com/carter/inv/internal/money"
 	"github.com/carter/inv/internal/store"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type editorField int
@@ -131,6 +132,7 @@ func (m EditorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = "Add at least one line item"
 				return m, nil
 			}
+			m.err = ""
 			return m, func() tea.Msg {
 				return invoiceSavedMsg{invoice: m.invoice, isNew: m.isNew}
 			}
@@ -168,6 +170,7 @@ func (m EditorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Quantity:    1,
 				Rate:        0,
 			})
+			m.err = ""
 			m.lineIdx = len(m.invoice.LineItems) - 1
 			m.focusField = fieldLineItems
 			m.editingLine = true
@@ -299,19 +302,14 @@ func (m EditorModel) View() tea.View {
 	b.WriteString("\n\n")
 
 	// Line items header
-	liHeader := fmt.Sprintf("  %-3s %-30s %6s %10s %10s", "#", "Description", "Qty", "Rate", "Total")
+	liHeader := renderLineItemRow("#", "Description", "Qty", "Rate", "Total")
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render(liHeader))
 	b.WriteString("\n")
 
 	for i, li := range m.invoice.LineItems {
-		desc := li.Description
-		if len(desc) > 30 {
-			desc = desc[:27] + "..."
-		}
-
-		line := fmt.Sprintf("  %-3d %-30s %6s %10s %10s",
-			i+1,
-			desc,
+		line := renderLineItemRow(
+			fmt.Sprintf("%d", i+1),
+			li.Description,
 			money.FormatQuantity(li.Quantity),
 			money.FormatRate(li.Rate, cur),
 			money.FormatCents(li.LineTotal(), cur),
@@ -392,12 +390,18 @@ func (m EditorModel) renderEditingLine(idx int, li model.LineItem) string {
 	}
 
 	if m.liField != liFieldDesc && len(desc) > 30 {
-		desc = desc[:27] + "..."
+		desc = ansi.Truncate(desc, 30, "...")
 	}
 
 	total := money.FormatCents(li.LineTotal(), cur)
 
-	return fmt.Sprintf("  %-3d %-30s %6s %10s %10s", idx+1, desc, qty, rate, total)
+	return renderLineItemRow(
+		fmt.Sprintf("%d", idx+1),
+		desc,
+		qty,
+		rate,
+		total,
+	)
 }
 
 func (m EditorModel) openEditor() tea.Cmd {
@@ -425,4 +429,29 @@ func (m EditorModel) openEditor() tea.Cmd {
 
 func editorTmpFile() string {
 	return fmt.Sprintf("%s/inv-edit.tmp", os.TempDir())
+}
+
+func renderLineItemRow(index, desc, qty, rate, total string) string {
+	return fmt.Sprintf(
+		"  %s %s %s %s %s",
+		padCell(index, 3, false, ""),
+		padCell(desc, 30, false, "..."),
+		padCell(qty, 6, true, ""),
+		padCell(rate, 10, true, ""),
+		padCell(total, 10, true, ""),
+	)
+}
+
+func padCell(content string, width int, alignRight bool, tail string) string {
+	if ansi.StringWidth(content) > width {
+		content = ansi.Truncate(content, width, tail)
+	}
+	padding := width - ansi.StringWidth(content)
+	if padding < 0 {
+		padding = 0
+	}
+	if alignRight {
+		return strings.Repeat(" ", padding) + content
+	}
+	return content + strings.Repeat(" ", padding)
 }

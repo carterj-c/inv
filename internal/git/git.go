@@ -24,7 +24,7 @@ func CommitAll(dir, message string) error {
 	if err := run(dir, "add", "-A"); err != nil {
 		return err
 	}
-	return run(dir, "commit", "-m", message, "--allow-empty=false")
+	return run(dir, "commit", "-m", message)
 }
 
 // Pull runs git pull if a remote is configured. Best-effort.
