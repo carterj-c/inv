@@ -186,17 +186,21 @@ func (m ListModel) selected() *model.Invoice {
 
 func (m ListModel) exportPDF(inv model.Invoice) tea.Cmd {
 	return func() tea.Msg {
-		path, err := pdf.Generate(inv, m.globals, m.clientCfg)
+		exportPath, archivePath, err := pdf.Generate(inv, m.globals, m.clientCfg)
 		if err != nil {
-			return statusMsg{text: fmt.Sprintf("PDF error: %v", err)}
+			return pdfExportedMsg{invoiceID: inv.ID, err: err}
 		}
 
 		// Try to open the PDF
 		if cmd, err := exec.LookPath("xdg-open"); err == nil {
-			exec.Command(cmd, path).Start()
+			exec.Command(cmd, exportPath).Start()
 		}
 
-		return statusMsg{text: fmt.Sprintf("PDF exported: %s", path)}
+		return pdfExportedMsg{
+			invoiceID:   inv.ID,
+			exportPath:  exportPath,
+			archivePath: archivePath,
+		}
 	}
 }
 

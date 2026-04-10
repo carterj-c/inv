@@ -7,6 +7,7 @@ import (
 	"github.com/carter/inv/internal/config"
 	"github.com/carter/inv/internal/git"
 	"github.com/carter/inv/internal/model"
+	"github.com/carter/inv/internal/pdfsync"
 	"github.com/carter/inv/internal/store"
 )
 
@@ -41,13 +42,27 @@ type setupCompleteMsg struct {
 type editorFinishedMsg struct{ err error }
 type statusMsg struct{ text string }
 type gitDoneMsg struct{ err error }
+type gitHubSetupDoneMsg struct {
+	ok  bool
+	err error
+}
+type pdfExportedMsg struct {
+	invoiceID   string
+	exportPath  string
+	archivePath string
+	err         error
+}
+type pdfSyncDoneMsg struct {
+	result pdfsync.Result
+	err    error
+}
 
 type AppModel struct {
-	state  viewState
-	list   ListModel
-	editor EditorModel
-	client ClientModel
-	setup  SetupModel
+	state    viewState
+	list     ListModel
+	editor   EditorModel
+	client   ClientModel
+	setup    SetupModel
 	modal    *ModalModel
 	showHelp bool
 
@@ -128,6 +143,8 @@ func (m AppModel) Init() tea.Cmd {
 
 	if m.state == viewSetup {
 		cmds = append(cmds, m.setup.Init())
+	} else if !git.IsRepo(dir) {
+		cmds = append(cmds, syncPDFsAsync(m.globals))
 	}
 
 	return tea.Batch(cmds...)
@@ -149,6 +166,51 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == viewList {
 				m.list = NewListModel(m.store, m.active, m.clientCfg, m.globals)
 			}
+		}
+		return m, syncPDFsAsync(m.globals)
+
+	case gitHubSetupDoneMsg:
+		if msg.ok {
+			m.status = "GitHub backup repo created via gh"
+		} else if msg.err != nil {
+			m.status = fmt.Sprintf("GitHub backup not configured: %v", msg.err)
+		}
+		return m, nil
+
+	case pdfExportedMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("PDF error: %v", msg.err)
+			return m, nil
+		}
+
+		if msg.archivePath != "" && msg.archivePath != msg.exportPath {
+			m.status = fmt.Sprintf("PDF exported: %s | tracked copy: %s", msg.exportPath, msg.archivePath)
+		} else {
+			m.status = fmt.Sprintf("PDF exported: %s", msg.exportPath)
+		}
+
+		if msg.archivePath != "" {
+			return m, gitCommitAsync(config.Dir(), fmt.Sprintf("archive pdf for invoice %s", msg.invoiceID))
+		}
+		return m, nil
+
+	case pdfSyncDoneMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("PDF sync error: %v", msg.err)
+			return m, nil
+		}
+		if msg.result.ExportUpdated == 0 && msg.result.ArchiveUpdated == 0 {
+			return m, nil
+		}
+
+		m.status = fmt.Sprintf(
+			"PDF sync: %d export updated, %d archived updated",
+			msg.result.ExportUpdated,
+			msg.result.ArchiveUpdated,
+		)
+
+		if msg.result.ArchiveUpdated > 0 && git.IsRepo(config.Dir()) {
+			return m, gitCommitAsync(config.Dir(), "sync pdf archive")
 		}
 		return m, nil
 
@@ -184,7 +246,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.store, _ = store.Load()
 		m.state = viewList
 		m.list = NewListModel(m.store, m.active, m.clientCfg, m.globals)
-		return m, nil
+		return m, setupGitHubAsync(dir)
 
 	case switchToEditorMsg:
 		m.state = viewEditor
@@ -384,5 +446,26 @@ func gitCommitAsync(dir, message string) tea.Cmd {
 	return func() tea.Msg {
 		gitCommit(dir, message)
 		return gitDoneMsg{}
+	}
+}
+
+func setupGitHubAsync(dir string) tea.Cmd {
+	return func() tea.Msg {
+		if !git.IsRepo(dir) || git.HasRemote(dir) || !git.HasGH() {
+			return gitHubSetupDoneMsg{}
+		}
+
+		err := git.SetupGitHub(dir)
+		if err != nil {
+			return gitHubSetupDoneMsg{err: err}
+		}
+		return gitHubSetupDoneMsg{ok: true}
+	}
+}
+
+func syncPDFsAsync(global model.GlobalConfig) tea.Cmd {
+	return func() tea.Msg {
+		result, err := pdfsync.Sync(global)
+		return pdfSyncDoneMsg{result: result, err: err}
 	}
 }

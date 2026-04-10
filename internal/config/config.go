@@ -29,12 +29,18 @@ func ClientsDir() string {
 	return filepath.Join(Dir(), "clients")
 }
 
+// PDFArchiveDir returns the tracked PDF archive directory within config data.
+func PDFArchiveDir() string {
+	return filepath.Join(DataDir(), "pdfs")
+}
+
 // EnsureDirs creates the config directory structure if it doesn't exist.
 func EnsureDirs() error {
 	dirs := []string{
 		Dir(),
 		DataDir(),
 		ClientsDir(),
+		PDFArchiveDir(),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {

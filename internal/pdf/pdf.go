@@ -2,6 +2,7 @@ package pdf
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +13,8 @@ import (
 	"github.com/go-pdf/fpdf"
 )
 
-// Generate creates a PDF for the given invoice and returns the output file path.
-func Generate(inv model.Invoice, global model.GlobalConfig, client model.ClientConfig) (string, error) {
+// Generate creates a PDF for the given invoice and returns the export and archive paths.
+func Generate(inv model.Invoice, global model.GlobalConfig, client model.ClientConfig) (string, string, error) {
 	cur := client.Currency
 	if cur == "" {
 		cur = global.Settings.DefaultCurrency
@@ -29,12 +30,18 @@ func Generate(inv model.Invoice, global model.GlobalConfig, client model.ClientC
 	exportDir = config.ExpandPath(exportDir)
 
 	if err := os.MkdirAll(exportDir, 0755); err != nil {
-		return "", fmt.Errorf("creating export dir: %w", err)
+		return "", "", fmt.Errorf("creating export dir: %w", err)
+	}
+
+	archiveDir := config.PDFArchiveDir()
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		return "", "", fmt.Errorf("creating PDF archive dir: %w", err)
 	}
 
 	slug := inv.ClientSlug
 	filename := fmt.Sprintf("%s_%s_%s.pdf", inv.ID, slug, inv.Date)
-	outPath := filepath.Join(exportDir, filename)
+	exportPath := filepath.Join(exportDir, filename)
+	archivePath := filepath.Join(archiveDir, filename)
 
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(20, 20, 20)
@@ -176,11 +183,17 @@ func Generate(inv model.Invoice, global model.GlobalConfig, client model.ClientC
 	_ = tableTop
 	_ = valX
 
-	if err := pdf.OutputFileAndClose(outPath); err != nil {
-		return "", fmt.Errorf("writing PDF: %w", err)
+	if err := pdf.OutputFileAndClose(exportPath); err != nil {
+		return "", "", fmt.Errorf("writing PDF: %w", err)
 	}
 
-	return outPath, nil
+	if !samePath(exportPath, archivePath) {
+		if err := copyFile(exportPath, archivePath); err != nil {
+			return "", "", fmt.Errorf("archiving PDF: %w", err)
+		}
+	}
+
+	return exportPath, archivePath, nil
 }
 
 func splitAddress(addr string) []string {
@@ -196,4 +209,28 @@ func splitAddress(addr string) []string {
 		return []string{addr}
 	}
 	return result
+}
+
+func samePath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+
+	return out.Close()
 }

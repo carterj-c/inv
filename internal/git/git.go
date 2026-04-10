@@ -1,9 +1,11 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // IsRepo returns true if the directory is a git repository.
@@ -51,20 +53,59 @@ func HasRemote(dir string) bool {
 // SetupGitHub attempts to create a private GitHub repo and set it as origin.
 // Requires the `gh` CLI to be installed and authenticated.
 func SetupGitHub(dir string) error {
-	// Create a private repo
-	if err := run(dir, "remote", "get-url", "origin"); err == nil {
-		return nil // already has a remote
+	if HasRemote(dir) {
+		return nil
+	}
+	if !HasGH() {
+		return fmt.Errorf("gh CLI is not installed")
+	}
+	if !HasGHAuth() {
+		return fmt.Errorf("gh CLI is not authenticated")
 	}
 
-	cmd := exec.Command("gh", "repo", "create", "invoice-config", "--private", "--source=.", "--push")
+	cmd := exec.Command(
+		"gh",
+		"repo",
+		"create",
+		"invoice-config",
+		"--private",
+		"--source=.",
+		"--remote=origin",
+		"--push",
+	)
 	cmd.Dir = dir
-	return cmd.Run()
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	// Ensure future plain `git push` calls have an upstream branch configured.
+	return run(dir, "push", "-u", "origin", "HEAD", "--quiet")
 }
 
 // HasGH returns true if the gh CLI is available.
 func HasGH() bool {
 	_, err := exec.LookPath("gh")
 	return err == nil
+}
+
+// HasGHAuth returns true if `gh` is installed and has a valid authenticated account.
+func HasGHAuth() bool {
+	if !HasGH() {
+		return false
+	}
+
+	cmd := exec.Command("gh", "auth", "status")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+
+	text := strings.ToLower(string(output))
+	return !strings.Contains(text, "failed to log in") &&
+		!strings.Contains(text, "not logged into any") &&
+		!strings.Contains(text, "invalid")
 }
 
 func run(dir string, args ...string) error {
