@@ -122,8 +122,11 @@ func (m ListModel) View() tea.View {
 	if cur == "" {
 		cur = "CAD"
 	}
-	header := fmt.Sprintf(" inv                                      [client: %s | %s]",
-		m.clientCfg.Name, cur)
+	header := justifyLine(
+		" inv",
+		fmt.Sprintf("[client: %s | %s]", m.clientCfg.Name, cur),
+		mainContentWidth,
+	)
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n\n")
 
@@ -132,7 +135,7 @@ func (m ListModel) View() tea.View {
 		"#", "Status", "Date", "Description", "Total")
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render(colHeader))
 	b.WriteString("\n")
-	b.WriteString(separatorStyle.Render(" " + strings.Repeat("─", 70)))
+	b.WriteString(separatorStyle.Render(" " + strings.Repeat("─", mainContentWidth-1)))
 	b.WriteString("\n")
 
 	if len(m.invoices) == 0 {

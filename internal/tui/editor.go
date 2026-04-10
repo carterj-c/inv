@@ -289,8 +289,11 @@ func (m EditorModel) View() tea.View {
 	if m.isNew {
 		title = "New Invoice"
 	}
-	b.WriteString(headerStyle.Render(fmt.Sprintf(" %s                                   [client: %s]",
-		title, m.clientCfg.Name)))
+	b.WriteString(headerStyle.Render(justifyLine(
+		" "+title,
+		fmt.Sprintf("[client: %s]", m.clientCfg.Name),
+		mainContentWidth,
+	)))
 	b.WriteString("\n\n")
 
 	// Invoice fields
@@ -298,7 +301,7 @@ func (m EditorModel) View() tea.View {
 	b.WriteString(m.renderField(" Date:", m.invoice.Date, fieldDate, true))
 	b.WriteString(m.renderField(" Payment Terms:", m.invoice.PaymentTerms, fieldPaymentTerms, true))
 
-	b.WriteString(separatorStyle.Render(" " + strings.Repeat("─", 70)))
+	b.WriteString(separatorStyle.Render(" " + strings.Repeat("─", mainContentWidth-1)))
 	b.WriteString("\n\n")
 
 	// Line items header

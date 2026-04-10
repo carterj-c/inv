@@ -39,7 +39,7 @@ Optional but useful:
 Clone the repository and build the binary:
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/carterj-c/inv
 cd inv
 go build .
 ```
